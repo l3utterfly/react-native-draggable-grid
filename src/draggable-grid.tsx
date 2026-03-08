@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   PanResponder,
   Animated,
@@ -35,7 +35,7 @@ export interface IDraggableGridProps<DataType extends IBaseItemType> {
   onDragItemActive?: (item: DataType) => void
   onDragStart?: (item: DataType) => void
   onDragging?: (gestureState: PanResponderGestureState) => void
-  onDragRelease?: (newSortedData: DataType[]) => void
+  onDragRelease?: (newSortedData: DataType[], targetItemIndex: number | undefined) => void
   onResetSort?: (newSortedData: DataType[]) => void
   delayLongPress?: number
 }
@@ -75,6 +75,9 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     height: 0,
   })
   const [activeItemIndex, setActiveItemIndex] = useState<undefined | number>()
+  
+  const didReorderRef = useRef(false)
+  const hoverTargetIndexRef = useRef<undefined | number>(undefined)
 
   const assessGridSize = (event: IOnLayoutEvent) => {
     if (!hadInitBlockSize) {
@@ -127,6 +130,8 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   function onStartDrag(_: GestureResponderEvent, gestureState: PanResponderGestureState) {
     const activeItem = getActiveItem()
     if (!activeItem) return false
+    didReorderRef.current = false
+    hoverTargetIndexRef.current = undefined
     props.onDragStart && props.onDragStart(activeItem.itemData)
     const { x0, y0, moveX, moveY } = gestureState
     const activeOrigin = blockPositions[orderMap[activeItem.key].order]
@@ -163,26 +168,58 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     const dragPositionToActivePositionDistance = getDistance(dragPosition, originPosition)
     activeItem.currentPosition.setValue(dragPosition)
 
+    const edgeThreshold = 0.2
+    const effectiveX = dragPosition.x + activeBlockOffset.x
+
     let closetItemIndex = activeItemIndex as number
     let closetDistance = dragPositionToActivePositionDistance
+    let currentHoverTarget: number | undefined = undefined
 
     items.forEach((item, index) => {
       if (item.itemData.disabledReSorted) return
       if (index != activeItemIndex) {
+        const itemPosition = blockPositions[orderMap[item.key].order]
         const dragPositionToItemPositionDistance = getDistance(
           dragPosition,
-          blockPositions[orderMap[item.key].order],
+          itemPosition,
         )
-        if (
-          dragPositionToItemPositionDistance < closetDistance &&
-          dragPositionToItemPositionDistance < blockWidth
-        ) {
-          closetItemIndex = index
-          closetDistance = dragPositionToItemPositionDistance
+
+        // Check if drag point is horizontally within this item
+        const withinX =
+          effectiveX >= itemPosition.x &&
+          effectiveX <= itemPosition.x + blockWidth
+
+        if (withinX) {
+          const inEdge =
+            effectiveX <= itemPosition.x + blockWidth * edgeThreshold ||
+            effectiveX >= itemPosition.x + blockWidth * (1 - edgeThreshold)
+
+          if (inEdge) {
+            // Edge zone → original reorder logic
+            if (
+              dragPositionToItemPositionDistance < closetDistance &&
+              dragPositionToItemPositionDistance < blockWidth
+            ) {
+              closetItemIndex = index
+              closetDistance = dragPositionToItemPositionDistance
+            }
+          } else {
+            // Center zone → drop target candidate
+            if (dragPositionToItemPositionDistance < blockWidth) {
+              currentHoverTarget = index
+            }
+          }
+        } else {
+          // Outside this item horizontally → still allow original reorder by distance
+          // (no change needed, item is simply skipped for both edge and center)
         }
       }
     })
+
+    hoverTargetIndexRef.current = currentHoverTarget
+
     if (activeItemIndex != closetItemIndex) {
+      didReorderRef.current = true
       const closetOrder = orderMap[items[closetItemIndex].key].order
       resetBlockPositionByOrder(orderMap[activeItem.key].order, closetOrder)
       orderMap[activeItem.key].order = closetOrder
@@ -192,11 +229,13 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   function onHandRelease() {
     const activeItem = getActiveItem()
     if (!activeItem) return false
-    props.onDragRelease && props.onDragRelease(getSortData())
+    props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetIndexRef.current)
     setPanResponderCapture(false)
     activeItem.currentPosition.flattenOffset()
     moveBlockToBlockOrderPosition(activeItem.key)
     setActiveItemIndex(undefined)
+    hoverTargetIndexRef.current = undefined
+    didReorderRef.current = false
   }
   function resetBlockPositionByOrder(activeItemOrder: number, insertedPositionOrder: number) {
     let disabledReSortedItemCount = 0
