@@ -78,6 +78,14 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   
   const didReorderRef = useRef(false)
   const hoverTargetIndexRef = useRef<undefined | number>(undefined)
+  const hoverScaleValues = useRef<IMap<Animated.Value>>({})
+
+  function getHoverScale(key: string | number): Animated.Value {
+    if (!hoverScaleValues.current[key]) {
+      hoverScaleValues.current[key] = new Animated.Value(1)
+    }
+    return hoverScaleValues.current[key]
+  }
 
   const assessGridSize = (event: IOnLayoutEvent) => {
     if (!hadInitBlockSize) {
@@ -216,7 +224,27 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
       }
     })
 
-    hoverTargetIndexRef.current = currentHoverTarget
+    if (hoverTargetIndexRef.current !== currentHoverTarget) {
+      // Animate previous hover target back to normal size
+      if (hoverTargetIndexRef.current !== undefined) {
+        const prevKey = items[hoverTargetIndexRef.current].key
+        Animated.spring(getHoverScale(prevKey), {
+          toValue: 1,
+          friction: 5,
+          useNativeDriver: false,
+        }).start()
+      }
+      // Animate new hover target to grow slightly
+      if (currentHoverTarget !== undefined) {
+        const newKey = items[currentHoverTarget].key
+        Animated.spring(getHoverScale(newKey), {
+          toValue: 1.1,
+          friction: 5,
+          useNativeDriver: false,
+        }).start()
+      }
+      hoverTargetIndexRef.current = currentHoverTarget
+    }
 
     if (activeItemIndex != closetItemIndex) {
       didReorderRef.current = true
@@ -231,6 +259,15 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     if (!activeItem) return false
     props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetIndexRef.current)
     setPanResponderCapture(false)
+    // Reset hover target scale back to normal
+    if (hoverTargetIndexRef.current !== undefined) {
+      const hoverKey = items[hoverTargetIndexRef.current].key
+      Animated.spring(getHoverScale(hoverKey), {
+        toValue: 1,
+        friction: 5,
+        useNativeDriver: false,
+      }).start()
+    }
     activeItem.currentPosition.flattenOffset()
     moveBlockToBlockOrderPosition(activeItem.key)
     setActiveItemIndex(undefined)
@@ -321,6 +358,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
         top: items[itemIndex].currentPosition.getLayout().top,
         left: I18nManager.isRTL && Platform.OS === 'web' ? undefined: items[itemIndex].currentPosition.getLayout().left,
         right: I18nManager.isRTL && Platform.OS === 'web' ? items[itemIndex].currentPosition.getLayout().left : undefined,
+        transform: [{ scale: getHoverScale(items[itemIndex].key) }],
 },
     ]
   }
@@ -373,6 +411,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     items.splice(itemIndex, 1)
     blockPositions.pop()
     delete orderMap[item.key]
+    delete hoverScaleValues.current[item.key]
   }
   function diffData() {
     props.data.forEach((item, index) => {
