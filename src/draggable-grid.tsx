@@ -176,53 +176,74 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     const dragPositionToActivePositionDistance = getDistance(dragPosition, originPosition)
     activeItem.currentPosition.setValue(dragPosition)
 
-    const edgeThreshold = 0.2
-    const effectiveX = dragPosition.x + activeBlockOffset.x
-
     let closetItemIndex = activeItemIndex as number
     let closetDistance = dragPositionToActivePositionDistance
-    let currentHoverTarget: number | undefined = undefined
 
     items.forEach((item, index) => {
       if (item.itemData.disabledReSorted) return
       if (index != activeItemIndex) {
-        const itemPosition = blockPositions[orderMap[item.key].order]
         const dragPositionToItemPositionDistance = getDistance(
           dragPosition,
-          itemPosition,
+          blockPositions[orderMap[item.key].order],
         )
-
-        // Check if drag point is horizontally within this item
-        const withinX =
-          effectiveX >= itemPosition.x &&
-          effectiveX <= itemPosition.x + blockWidth
-
-        if (withinX) {
-          const inEdge =
-            effectiveX <= itemPosition.x + blockWidth * edgeThreshold ||
-            effectiveX >= itemPosition.x + blockWidth * (1 - edgeThreshold)
-
-          if (inEdge) {
-            // Edge zone → original reorder logic
-            if (
-              dragPositionToItemPositionDistance < closetDistance &&
-              dragPositionToItemPositionDistance < blockWidth
-            ) {
-              closetItemIndex = index
-              closetDistance = dragPositionToItemPositionDistance
-            }
-          } else {
-            // Center zone → drop target candidate
-            if (dragPositionToItemPositionDistance < blockWidth) {
-              currentHoverTarget = index
-            }
-          }
-        } else {
-          // Outside this item horizontally → still allow original reorder by distance
-          // (no change needed, item is simply skipped for both edge and center)
+        if (
+          dragPositionToItemPositionDistance < closetDistance &&
+          dragPositionToItemPositionDistance < blockWidth
+        ) {
+          closetItemIndex = index
+          closetDistance = dragPositionToItemPositionDistance
         }
       }
     })
+
+    let currentHoverTarget: number | undefined = undefined
+
+    if (activeItemIndex != closetItemIndex) {
+      // Reorder triggered — no hover target
+      didReorderRef.current = true
+      const closetOrder = orderMap[items[closetItemIndex].key].order
+      resetBlockPositionByOrder(orderMap[activeItem.key].order, closetOrder)
+      orderMap[activeItem.key].order = closetOrder
+      props.onResetSort && props.onResetSort(getSortData())
+    } else {
+      // No reorder — find hover target by largest overlap area
+      const dragRect = {
+        left: dragPosition.x + activeBlockOffset.x,
+        top: dragPosition.y + activeBlockOffset.y,
+        right: dragPosition.x + activeBlockOffset.x + blockWidth,
+        bottom: dragPosition.y + activeBlockOffset.y + blockHeight,
+      }
+
+      let maxOverlap = 0
+
+      items.forEach((item, index) => {
+        if (item.itemData.disabledReSorted) return
+        if (index === activeItemIndex) return
+
+        const itemPosition = blockPositions[orderMap[item.key].order]
+        const itemRect = {
+          left: itemPosition.x,
+          top: itemPosition.y,
+          right: itemPosition.x + blockWidth,
+          bottom: itemPosition.y + blockHeight,
+        }
+
+        const overlapX = Math.max(0, Math.min(dragRect.right, itemRect.right) - Math.max(dragRect.left, itemRect.left))
+        const overlapY = Math.max(0, Math.min(dragRect.bottom, itemRect.bottom) - Math.max(dragRect.top, itemRect.top))
+        const overlapArea = overlapX * overlapY
+
+        if (overlapArea > maxOverlap) {
+          maxOverlap = overlapArea
+          currentHoverTarget = index
+        }
+      })
+
+      // Only consider it a hover if the overlap is at least 10% of the block area
+      const minOverlapThreshold = blockWidth * blockHeight * 0.3
+      if (maxOverlap < minOverlapThreshold) {
+        currentHoverTarget = undefined
+      }
+    }
 
     if (hoverTargetIndexRef.current !== currentHoverTarget) {
       // Animate previous hover target back to normal size
@@ -244,14 +265,6 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
         }).start()
       }
       hoverTargetIndexRef.current = currentHoverTarget
-    }
-
-    if (activeItemIndex != closetItemIndex) {
-      didReorderRef.current = true
-      const closetOrder = orderMap[items[closetItemIndex].key].order
-      resetBlockPositionByOrder(orderMap[activeItem.key].order, closetOrder)
-      orderMap[activeItem.key].order = closetOrder
-      props.onResetSort && props.onResetSort(getSortData())
     }
   }
   function onHandRelease() {
