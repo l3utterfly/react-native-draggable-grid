@@ -35,7 +35,7 @@ export interface IDraggableGridProps<DataType extends IBaseItemType> {
   onDragItemActive?: (item: DataType) => void
   onDragStart?: (item: DataType) => void
   onDragging?: (gestureState: PanResponderGestureState) => void
-  onDragRelease?: (newSortedData: DataType[], targetItemIndex: number | undefined) => void
+  onDragRelease?: (newSortedData: DataType[], targetItemKey: string | undefined) => void
   onResetSort?: (newSortedData: DataType[]) => void
   delayLongPress?: number
 }
@@ -77,7 +77,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   const [activeItemIndex, setActiveItemIndex] = useState<undefined | number>()
   
   const didReorderRef = useRef(false)
-  const hoverTargetIndexRef = useRef<undefined | number>(undefined)
+  const hoverTargetKeyRef = useRef<undefined | string>(undefined)
   const hoverScaleValues = useRef<IMap<Animated.Value>>({})
 
   function getHoverScale(key: string | number): Animated.Value {
@@ -139,7 +139,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     const activeItem = getActiveItem()
     if (!activeItem) return false
     didReorderRef.current = false
-    hoverTargetIndexRef.current = undefined
+    hoverTargetKeyRef.current = undefined
     props.onDragStart && props.onDragStart(activeItem.itemData)
     const { x0, y0, moveX, moveY } = gestureState
     const activeOrigin = blockPositions[orderMap[activeItem.key].order]
@@ -196,7 +196,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
       }
     })
 
-    let currentHoverTarget: number | undefined = undefined
+    let currentHoverKey: string | undefined = undefined
 
     if (activeItemIndex != closetItemIndex) {
       // Reorder triggered — no hover target
@@ -234,21 +234,22 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
 
         if (overlapArea > maxOverlap) {
           maxOverlap = overlapArea
-          currentHoverTarget = index
+          currentHoverKey = item.key as string
         }
       })
 
       // Only consider it a hover if the overlap is at least 10% of the block area
       const minOverlapThreshold = blockWidth * blockHeight * 0.3
       if (maxOverlap < minOverlapThreshold) {
-        currentHoverTarget = undefined
+        currentHoverKey = undefined
       }
     }
 
-    if (hoverTargetIndexRef.current !== currentHoverTarget) {
+    if (hoverTargetKeyRef.current !== currentHoverKey) {
       // Animate previous hover target back to normal size
-      if (hoverTargetIndexRef.current !== undefined) {
-        const prevKey = items[hoverTargetIndexRef.current].key
+      if (hoverTargetKeyRef.current !== undefined) {
+        const prevKey = items.find(item => item.key === hoverTargetKeyRef.current)?.key
+        if (prevKey === undefined) return
         Animated.spring(getHoverScale(prevKey), {
           toValue: 1,
           friction: 5,
@@ -256,25 +257,27 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
         }).start()
       }
       // Animate new hover target to grow slightly
-      if (currentHoverTarget !== undefined) {
-        const newKey = items[currentHoverTarget].key
+      if (currentHoverKey !== undefined) {
+        const newKey = items.find(item => item.key === currentHoverKey)?.key
+        if (newKey === undefined) return
         Animated.spring(getHoverScale(newKey), {
           toValue: 1.1,
           friction: 5,
           useNativeDriver: false,
         }).start()
       }
-      hoverTargetIndexRef.current = currentHoverTarget
+      hoverTargetKeyRef.current = currentHoverKey
     }
   }
   function onHandRelease() {
     const activeItem = getActiveItem()
     if (!activeItem) return false
-    props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetIndexRef.current)
+    props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetKeyRef.current)
     setPanResponderCapture(false)
     // Reset hover target scale back to normal
-    if (hoverTargetIndexRef.current !== undefined) {
-      const hoverKey = items[hoverTargetIndexRef.current].key
+    if (hoverTargetKeyRef.current !== undefined) {
+      const hoverKey = items.find(item => item.key === hoverTargetKeyRef.current)?.key
+      if (hoverKey === undefined) return
       Animated.spring(getHoverScale(hoverKey), {
         toValue: 1,
         friction: 5,
@@ -284,7 +287,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     activeItem.currentPosition.flattenOffset()
     moveBlockToBlockOrderPosition(activeItem.key)
     setActiveItemIndex(undefined)
-    hoverTargetIndexRef.current = undefined
+    hoverTargetKeyRef.current = undefined
     didReorderRef.current = false
   }
   function resetBlockPositionByOrder(activeItemOrder: number, insertedPositionOrder: number) {
