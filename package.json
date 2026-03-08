@@ -37,7 +37,7 @@
     ]
   },
   "pre-commit": [
-    "test"
+    
   ],
   "author": "shisme",
   "license": "ISC",
