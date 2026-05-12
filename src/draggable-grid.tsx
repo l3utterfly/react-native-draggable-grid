@@ -1,3 +1,5 @@
+/** @format */
+
 import * as React from 'react'
 import { useState, useEffect, useRef } from 'react'
 import {
@@ -9,7 +11,7 @@ import {
   PanResponderGestureState,
   ViewStyle,
   Platform,
-  I18nManager
+  I18nManager,
 } from 'react-native'
 import { Block } from './block'
 import { findKey, findIndex, differenceBy } from './utils'
@@ -35,7 +37,7 @@ export interface IDraggableGridProps<DataType extends IBaseItemType> {
   onDragItemActive?: (item: DataType) => void
   onDragStart?: (item: DataType) => void
   onDragging?: (gestureState: PanResponderGestureState) => void
-  onDragRelease?: (newSortedData: DataType[], targetItemKey: string | undefined) => void
+  onDragRelease?: (newSortedData: DataType[], targetItemKey: string | undefined, droppingOutside?: boolean) => void
   onResetSort?: (newSortedData: DataType[]) => void
   delayLongPress?: number
 }
@@ -75,10 +77,12 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
     height: 0,
   })
   const [activeItemIndex, setActiveItemIndex] = useState<undefined | number>()
-  
+
   const didReorderRef = useRef(false)
   const hoverTargetKeyRef = useRef<undefined | string>(undefined)
   const hoverScaleValues = useRef<IMap<Animated.Value>>({})
+  const gridLayoutRef = useRef(gridLayout)
+  const droppingOutsideRef = useRef(false)
 
   function getHoverScale(key: string | number): Animated.Value {
     if (!hoverScaleValues.current[key]) {
@@ -88,12 +92,13 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   }
 
   const assessGridSize = (event: IOnLayoutEvent) => {
+    setGridLayout(event.nativeEvent.layout)
+
     if (!hadInitBlockSize) {
       let blockWidth = event.nativeEvent.layout.width / props.numColumns
       let blockHeight = props.itemHeight || blockWidth
       setBlockWidth(blockWidth)
       setBlockHeight(blockHeight)
-      setGridLayout(event.nativeEvent.layout)
       setHadInitBlockSize(true)
     }
   }
@@ -161,7 +166,7 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   function onHandMove(_: GestureResponderEvent, gestureState: PanResponderGestureState) {
     const activeItem = getActiveItem()
     if (!activeItem) return false
-    const { moveX:moveXOriginal, moveY } = gestureState
+    const { moveX: moveXOriginal, moveY } = gestureState
     const moveX = I18nManager.isRTL ? -moveXOriginal : moveXOriginal
     props.onDragging && props.onDragging(gestureState)
 
@@ -228,8 +233,14 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
           bottom: itemPosition.y + blockHeight,
         }
 
-        const overlapX = Math.max(0, Math.min(dragRect.right, itemRect.right) - Math.max(dragRect.left, itemRect.left))
-        const overlapY = Math.max(0, Math.min(dragRect.bottom, itemRect.bottom) - Math.max(dragRect.top, itemRect.top))
+        const overlapX = Math.max(
+          0,
+          Math.min(dragRect.right, itemRect.right) - Math.max(dragRect.left, itemRect.left),
+        )
+        const overlapY = Math.max(
+          0,
+          Math.min(dragRect.bottom, itemRect.bottom) - Math.max(dragRect.top, itemRect.top),
+        )
         const overlapArea = overlapX * overlapY
 
         if (overlapArea > maxOverlap) {
@@ -268,11 +279,26 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
       }
       hoverTargetKeyRef.current = currentHoverKey
     }
+
+    // detect if we are dragging outside
+    //console.log('dragPosition:', dragPosition)
+    //console.log('gridLayout:', gridLayoutRef.current)
+
+    const centerX = dragPosition.x + activeBlockOffset.x + blockWidth / 2
+    const centerY = dragPosition.y + activeBlockOffset.y + blockHeight / 2
+
+    const rowCount = Math.ceil(items.length / props.numColumns)
+    const contentHeight = rowCount * blockHeight
+
+    const isOutside =
+      centerX < 0 || centerY < 0 || centerX > gridLayoutRef.current.width || centerY > contentHeight
+
+    droppingOutsideRef.current = isOutside
   }
   function onHandRelease() {
     const activeItem = getActiveItem()
     if (!activeItem) return false
-    props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetKeyRef.current)
+    props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetKeyRef.current, droppingOutsideRef.current)
     setPanResponderCapture(false)
     // Reset hover target scale back to normal
     if (hoverTargetKeyRef.current !== undefined) {
@@ -372,10 +398,16 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
         height: blockHeight,
         position: 'absolute',
         top: items[itemIndex].currentPosition.getLayout().top,
-        left: I18nManager.isRTL && Platform.OS === 'web' ? undefined: items[itemIndex].currentPosition.getLayout().left,
-        right: I18nManager.isRTL && Platform.OS === 'web' ? items[itemIndex].currentPosition.getLayout().left : undefined,
+        left:
+          I18nManager.isRTL && Platform.OS === 'web'
+            ? undefined
+            : items[itemIndex].currentPosition.getLayout().left,
+        right:
+          I18nManager.isRTL && Platform.OS === 'web'
+            ? items[itemIndex].currentPosition.getLayout().left
+            : undefined,
         transform: [{ scale: getHoverScale(items[itemIndex].key) }],
-},
+      },
     ]
   }
   function getDragStartAnimation(itemIndex: number) {
@@ -453,14 +485,18 @@ export const DraggableGrid = function<DataType extends IBaseItemType>(
   useEffect(() => {
     startDragStartAnimation()
   }, [activeItemIndex])
+
   useEffect(() => {
     if (hadInitBlockSize) {
       initBlockPositions()
     }
+    gridLayoutRef.current = gridLayout
   }, [gridLayout])
+
   useEffect(() => {
     resetGridHeight()
   })
+
   if (hadInitBlockSize) {
     diffData()
   }

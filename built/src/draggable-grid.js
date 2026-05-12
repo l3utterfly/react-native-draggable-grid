@@ -1,4 +1,5 @@
 "use strict";
+/** @format */
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -38,6 +39,8 @@ var DraggableGrid = function (props) {
     var didReorderRef = (0, react_1.useRef)(false);
     var hoverTargetKeyRef = (0, react_1.useRef)(undefined);
     var hoverScaleValues = (0, react_1.useRef)({});
+    var gridLayoutRef = (0, react_1.useRef)(gridLayout);
+    var droppingOutsideRef = (0, react_1.useRef)(false);
     function getHoverScale(key) {
         if (!hoverScaleValues.current[key]) {
             hoverScaleValues.current[key] = new react_native_1.Animated.Value(1);
@@ -45,12 +48,12 @@ var DraggableGrid = function (props) {
         return hoverScaleValues.current[key];
     }
     var assessGridSize = function (event) {
+        setGridLayout(event.nativeEvent.layout);
         if (!hadInitBlockSize) {
             var blockWidth_1 = event.nativeEvent.layout.width / props.numColumns;
             var blockHeight_1 = props.itemHeight || blockWidth_1;
             setBlockWidth(blockWidth_1);
             setBlockHeight(blockHeight_1);
-            setGridLayout(event.nativeEvent.layout);
             setHadInitBlockSize(true);
         }
     };
@@ -214,13 +217,22 @@ var DraggableGrid = function (props) {
             }
             hoverTargetKeyRef.current = currentHoverKey;
         }
+        // detect if we are dragging outside
+        //console.log('dragPosition:', dragPosition)
+        //console.log('gridLayout:', gridLayoutRef.current)
+        var centerX = dragPosition.x + activeBlockOffset.x + blockWidth / 2;
+        var centerY = dragPosition.y + activeBlockOffset.y + blockHeight / 2;
+        var rowCount = Math.ceil(items.length / props.numColumns);
+        var contentHeight = rowCount * blockHeight;
+        var isOutside = centerX < 0 || centerY < 0 || centerX > gridLayoutRef.current.width || centerY > contentHeight;
+        droppingOutsideRef.current = isOutside;
     }
     function onHandRelease() {
         var _a;
         var activeItem = getActiveItem();
         if (!activeItem)
             return false;
-        props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetKeyRef.current);
+        props.onDragRelease && props.onDragRelease(getSortData(), hoverTargetKeyRef.current, droppingOutsideRef.current);
         setPanResponderCapture(false);
         // Reset hover target scale back to normal
         if (hoverTargetKeyRef.current !== undefined) {
@@ -322,8 +334,12 @@ var DraggableGrid = function (props) {
                 height: blockHeight,
                 position: 'absolute',
                 top: items[itemIndex].currentPosition.getLayout().top,
-                left: react_native_1.I18nManager.isRTL && react_native_1.Platform.OS === 'web' ? undefined : items[itemIndex].currentPosition.getLayout().left,
-                right: react_native_1.I18nManager.isRTL && react_native_1.Platform.OS === 'web' ? items[itemIndex].currentPosition.getLayout().left : undefined,
+                left: react_native_1.I18nManager.isRTL && react_native_1.Platform.OS === 'web'
+                    ? undefined
+                    : items[itemIndex].currentPosition.getLayout().left,
+                right: react_native_1.I18nManager.isRTL && react_native_1.Platform.OS === 'web'
+                    ? items[itemIndex].currentPosition.getLayout().left
+                    : undefined,
                 transform: [{ scale: getHoverScale(items[itemIndex].key) }],
             },
         ];
@@ -404,6 +420,7 @@ var DraggableGrid = function (props) {
         if (hadInitBlockSize) {
             initBlockPositions();
         }
+        gridLayoutRef.current = gridLayout;
     }, [gridLayout]);
     (0, react_1.useEffect)(function () {
         resetGridHeight();
